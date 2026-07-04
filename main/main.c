@@ -325,10 +325,10 @@ static bool touch_read(touch_point_t *point)
 
 static char button_for_touch(const touch_point_t *point)
 {
-    if (point->x < LCD_WIDTH / 3) {
+    if (point->y < LCD_HEIGHT / 3) {
         return 'C';
     }
-    if (point->x < (LCD_WIDTH * 2) / 3) {
+    if (point->y < (LCD_HEIGHT * 2) / 3) {
         return 'V';
     }
     return 'X';
@@ -372,7 +372,7 @@ static void send_mac_shortcut(char button)
 
 static void touch_task(void *arg)
 {
-    ESP_LOGI(TAG, "touch task running; layout: [C] [V] [X], screen %dx%d", LCD_WIDTH, LCD_HEIGHT);
+    ESP_LOGI(TAG, "touch task running; layout: top=C middle=V bottom=X, screen %dx%d", LCD_WIDTH, LCD_HEIGHT);
 
     TickType_t last_action_tick = 0;
     while (true) {
