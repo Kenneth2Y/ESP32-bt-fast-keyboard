@@ -188,16 +188,33 @@ static void lcd_draw_button(int index, char label, bool active)
     lcd_draw_char_big(label, x + (button_w - 54) / 2, top + 38, fg);
 }
 
+static void lcd_draw_status_indicator(void)
+{
+    if (s_hid_connected) {
+        lcd_fill_rect(14, 10, 28, 24, rgb565(0, 235, 80));
+        lcd_fill_rect(20, 16, 16, 12, rgb565(210, 255, 220));
+        return;
+    }
+
+    const uint16_t red = rgb565(255, 40, 40);
+    lcd_fill_rect(14, 10, 28, 24, rgb565(45, 0, 0));
+    for (int i = 0; i < 24; i += 4) {
+        lcd_fill_rect(16 + i, 12 + i, 4, 4, red);
+        lcd_fill_rect(38 - i, 12 + i, 4, 4, red);
+    }
+}
+
 static void lcd_draw_ui(bool flash, char active_button)
 {
     const uint16_t black = rgb565(0, 0, 0);
     const uint16_t white = rgb565(255, 255, 255);
-    const uint16_t status = s_hid_connected ? rgb565(0, 100, 55) : rgb565(80, 55, 0);
 
     lcd_fill_rect(0, 0, LCD_WIDTH, LCD_HEIGHT, flash ? white : black);
-    lcd_fill_rect(0, 0, LCD_WIDTH, 44, status);
-    lcd_fill_rect(14, 14, s_hid_connected ? 100 : 58, 16, white);
-    lcd_fill_rect(126, 14, 180, 16, rgb565(120, 130, 140));
+    lcd_fill_rect(0, 0, LCD_WIDTH, 44, rgb565(8, 10, 12));
+    lcd_draw_status_indicator();
+    lcd_fill_rect(56, 14, s_hid_connected ? 132 : 64, 16,
+                  s_hid_connected ? rgb565(0, 160, 70) : rgb565(170, 35, 35));
+    lcd_fill_rect(202, 14, 92, 16, rgb565(90, 100, 110));
 
     lcd_draw_button(0, 'C', active_button == 'C');
     lcd_draw_button(1, 'V', active_button == 'V');
@@ -326,12 +343,12 @@ static bool touch_read(touch_point_t *point)
 static char button_for_touch(const touch_point_t *point)
 {
     if (point->y < LCD_HEIGHT / 3) {
-        return 'C';
+        return 'X';
     }
     if (point->y < (LCD_HEIGHT * 2) / 3) {
         return 'V';
     }
-    return 'X';
+    return 'C';
 }
 
 static uint8_t keycode_for_button(char button)
