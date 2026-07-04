@@ -1,0 +1,73 @@
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x17 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0040,len:6272
+load:0x40078000,len:15848
+load:0x40080400,len:3920
+entry 0x40080644
+I (27) boot: ESP-IDF v6.0.1 2nd stage bootloader
+I (27) boot: compile time Jul  4 2026 14:43:03
+I (28) boot: Multicore bootloader
+I (29) boot: chip revision: v3.1
+I (32) boot.esp32: SPI Speed      : 40MHz
+I (35) boot.esp32: SPI Mode       : DIO
+I (39) boot.esp32: SPI Flash Size : 4MB
+I (42) boot: Enabling RNG early entropy source...
+I (47) boot: Partition Table:
+I (49) boot: ## Label            Usage          Type ST Offset   Length
+I (56) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (62) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (69) boot:  2 factory          factory app      00 00 00010000 00177000
+I (75) boot: End of partition table
+I (79) esp_image: segment 0: paddr=00010020 vaddr=3f400020 size=1ce8ch (118412) map
+I (128) esp_image: segment 1: paddr=0002ceb4 vaddr=3ffbdb60 size=03164h ( 12644) load
+I (134) esp_image: segment 2: paddr=00030020 vaddr=400d0020 size=67274h (422516) map
+I (284) esp_image: segment 3: paddr=0009729c vaddr=3ffc0cc4 size=01cb8h (  7352) load
+I (287) esp_image: segment 4: paddr=00098f5c vaddr=40080000 size=16b20h ( 92960) load
+I (326) esp_image: segment 5: paddr=000afa84 vaddr=50000000 size=00028h (    40) load
+I (338) boot: Loaded app from partition at offset 0x10000
+I (338) boot: Disabling RNG early entropy source...
+I (348) cpu_start: Multicore app
+I (356) cpu_start: GPIO 3 and 1 are used as console UART I/O pins
+I (357) cpu_start: Pro cpu start user code
+I (357) cpu_start: cpu freq: 160000000 Hz
+I (359) app_init: Application information:
+I (362) app_init: Project name:     cy01_esp32_fast_keyboard
+I (368) app_init: App version:      1
+I (371) app_init: Compile time:     Jul  4 2026 14:42:22
+I (376) app_init: ELF file SHA256:  e7b314722...
+I (381) app_init: ESP-IDF:          v6.0.1
+I (384) efuse_init: Min chip rev:     v0.0
+I (388) efuse_init: Max chip rev:     v3.99 
+I (392) efuse_init: Chip rev:         v3.1
+I (396) heap_init: Initializing. RAM available for dynamic allocation:
+I (402) heap_init: At 3FFAFF10 len 000000F0 (0 KiB): DRAM
+I (407) heap_init: At 3FFB6388 len 00001C78 (7 KiB): DRAM
+I (413) heap_init: At 3FFB9A20 len 00004108 (16 KiB): DRAM
+I (418) heap_init: At 3FFC6DA8 len 00019258 (100 KiB): DRAM
+I (423) heap_init: At 3FFE0440 len 00003AE0 (14 KiB): D/IRAM
+I (428) heap_init: At 3FFE4350 len 0001BCB0 (111 KiB): D/IRAM
+I (434) heap_init: At 40096B20 len 000094E0 (37 KiB): IRAM
+I (440) spi_flash: detected chip: generic
+I (443) spi_flash: flash io: dio
+I (447) coexist: coex firmware version: b00e8cb
+I (451) main_task: Started on CPU0
+I (461) main_task: Calling app_main()
+I (471) CY01: boot: CY01 Fast Keyboard
+I (471) CY01: chip cores=2 revision=301 features=0x00000032
+I (471) CY01: flash=4MB
+I (471) CY01: bt_mac=20:E7:C8:9C:64:5E
+I (471) CY01: touch pins: SCK=25 DIN=32 CS=33 IRQ=36 DOUT=39
+I (481) BTDM_INIT: BT controller compile version [a5d37fe]
+I (481) BTDM_INIT: Using main XTAL as clock source
+I (491) BTDM_INIT: Bluetooth MAC: 20:e7:c8:9c:64:5e
+I (501) phy_init: phy_version 4863,a3a4459,Oct 28 2025,14:30:06
+I (571) phy_init: Saving new calibration data due to checksum failure or outdated calibration data, mode(0)
+W (891) BT_BTM: BTM_BleWriteAdvData, Partial data write into ADV
+I (911) CY01: BLE HID started; advertising as "CY01 Fast Keyboard"
+I (911) CY01: touch task running; layout: [C] [V] [X], screen 320x240
+I (911) CY01: main loop running
+I (911) main_task: Returned from app_main()

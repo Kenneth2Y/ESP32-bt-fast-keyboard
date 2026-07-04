@@ -1,0 +1,3 @@
+Executing action: monitor
+Running idf_monitor in directory /Users/ky/kycx/cy01-esp32-fast-keyboard
+Executing "/Users/ky/.espressif/tools/python/v6.0.1/venv/bin/python /Users/ky/.espressif/v6.0.1/esp-idf/tools/idf_monitor.py -p /dev/cu.usbserial-10 -b 115200 --toolchain-prefix xtensa-esp32-elf- --target esp32 --revision 0 /Users/ky/kycx/cy01-esp32-fast-keyboard/build/cy01_esp32_fast_keyboard.elf /Users/ky/kycx/cy01-esp32-fast-keyboard/build/bootloader/bootloader.elf -m '/Users/ky/.espressif/tools/python/v6.0.1/venv/bin/python' '/Users/ky/.espressif/v6.0.1/esp-idf/tools/idf.py' '-p' '/dev/cu.usbserial-10'"...
