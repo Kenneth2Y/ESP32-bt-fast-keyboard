@@ -54,6 +54,9 @@
 #define LCD_CMD_BITS 8
 #define LCD_PARAM_BITS 8
 
+#define BEEPER_GPIO GPIO_NUM_23
+#define BEEPER_PULSE_MS 80
+
 #define TOUCH_X_MIN 350
 #define TOUCH_X_MAX 3800
 #define TOUCH_Y_MIN 350
@@ -221,16 +224,6 @@ static void lcd_draw_ui(bool flash, char active_button)
     lcd_draw_button(2, 'X', active_button == 'X');
 }
 
-static void lcd_flash_button(char button)
-{
-    if (!s_lcd_panel) {
-        return;
-    }
-    lcd_draw_ui(false, button);
-    vTaskDelay(pdMS_TO_TICKS(90));
-    lcd_draw_ui(false, 0);
-}
-
 static void lcd_init(void)
 {
     ESP_LOGI(TAG, "lcd init: ST7789 MOSI=%d MISO=%d SCLK=%d CS=%d DC=%d BL=%d",
@@ -387,6 +380,13 @@ static void send_mac_shortcut(char button)
     ESP_LOGI(TAG, "sent Command+%c", button);
 }
 
+static void beep_feedback(void)
+{
+    gpio_set_level(BEEPER_GPIO, 1);
+    vTaskDelay(pdMS_TO_TICKS(BEEPER_PULSE_MS));
+    gpio_set_level(BEEPER_GPIO, 0);
+}
+
 static void touch_task(void *arg)
 {
     ESP_LOGI(TAG, "touch task running; layout: top=C middle=V bottom=X, screen %dx%d", LCD_WIDTH, LCD_HEIGHT);
@@ -409,7 +409,7 @@ static void touch_task(void *arg)
         char button = button_for_touch(&point);
         ESP_LOGI(TAG, "touch raw=(%" PRIu16 ",%" PRIu16 ") mapped=(%d,%d) button=%c",
                  point.raw_x, point.raw_y, point.x, point.y, button);
-        lcd_flash_button(button);
+        beep_feedback();
         send_mac_shortcut(button);
 
         while (gpio_get_level(RTP_IRQ_GPIO) == 0) {
@@ -444,6 +444,20 @@ static void touch_init(void)
 
     ESP_LOGI(TAG, "touch pins: SCK=%d DIN=%d CS=%d IRQ=%d DOUT=%d",
              RTP_SCK_GPIO, RTP_DIN_GPIO, RTP_CS_GPIO, RTP_IRQ_GPIO, RTP_DOUT_GPIO);
+}
+
+static void beeper_init(void)
+{
+    gpio_config_t beeper_conf = {
+        .pin_bit_mask = 1ULL << BEEPER_GPIO,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&beeper_conf));
+    gpio_set_level(BEEPER_GPIO, 0);
+    ESP_LOGI(TAG, "beeper pin: GPIO%d pulse=%dms", BEEPER_GPIO, BEEPER_PULSE_MS);
 }
 
 static void log_device_info(void)
@@ -522,6 +536,7 @@ void app_main(void)
     log_device_info();
     lcd_init();
     touch_init();
+    beeper_init();
 
     ESP_ERROR_CHECK(esp_hid_gap_init(HIDD_BLE_MODE));
     ESP_ERROR_CHECK(esp_hid_ble_gap_adv_init(ESP_HID_APPEARANCE_KEYBOARD, DEVICE_NAME));
