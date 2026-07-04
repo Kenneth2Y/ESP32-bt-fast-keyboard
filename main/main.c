@@ -32,6 +32,8 @@
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
 
+#include "ui_assets.h"
+
 #define DEVICE_NAME "FastKeyboard"
 #define MANUFACTURER_NAME "Kenneth2Y"
 
@@ -75,8 +77,6 @@ static esp_hidd_dev_t *s_hid_dev;
 static esp_lcd_panel_handle_t s_lcd_panel;
 static volatile bool s_hid_connected;
 
-static uint16_t s_lcd_line[LCD_WIDTH];
-
 static const uint8_t s_keyboard_report_map[] = {
     0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, HID_REPORT_ID_KEYBOARD,
     0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7, 0x15, 0x00, 0x25, 0x01,
@@ -112,116 +112,17 @@ typedef struct {
     uint16_t raw_y;
 } touch_point_t;
 
-static uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
+static void lcd_draw_ui(void)
 {
-    return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
-}
-
-static void lcd_fill_rect(int x, int y, int w, int h, uint16_t color)
-{
-    if (!s_lcd_panel || w <= 0 || h <= 0) {
-        return;
-    }
-    if (x < 0) {
-        w += x;
-        x = 0;
-    }
-    if (y < 0) {
-        h += y;
-        y = 0;
-    }
-    if (x + w > LCD_WIDTH) {
-        w = LCD_WIDTH - x;
-    }
-    if (y + h > LCD_HEIGHT) {
-        h = LCD_HEIGHT - y;
-    }
-    if (w <= 0 || h <= 0) {
+    if (!s_lcd_panel) {
         return;
     }
 
-    for (int i = 0; i < w; i++) {
-        s_lcd_line[i] = color;
+    const uint16_t *image = s_hid_connected ? s_ui_bt_on : s_ui_bt_off;
+    for (int row = 0; row < LCD_HEIGHT; row++) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_draw_bitmap(
+            s_lcd_panel, 0, row, LCD_WIDTH, row + 1, image + row * LCD_WIDTH));
     }
-    for (int row = 0; row < h; row++) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_draw_bitmap(s_lcd_panel, x, y + row, x + w, y + row + 1, s_lcd_line));
-    }
-}
-
-static void lcd_draw_char_big(char ch, int x, int y, uint16_t color)
-{
-    const int t = 10;
-    const int w = 54;
-    const int h = 72;
-
-    if (ch == 'C') {
-        lcd_fill_rect(x, y, w, t, color);
-        lcd_fill_rect(x, y + h - t, w, t, color);
-        lcd_fill_rect(x, y, t, h, color);
-    } else if (ch == 'V') {
-        lcd_fill_rect(x, y, t, h - 18, color);
-        lcd_fill_rect(x + w - t, y, t, h - 18, color);
-        lcd_fill_rect(x + 10, y + h - 18, w - 20, t, color);
-        lcd_fill_rect(x + 22, y + h - 8, w - 44, 8, color);
-    } else if (ch == 'X') {
-        for (int i = 0; i < h; i += 8) {
-            int px = (i * (w - t)) / h;
-            lcd_fill_rect(x + px, y + i, t, 8, color);
-            lcd_fill_rect(x + w - t - px, y + i, t, 8, color);
-        }
-    }
-}
-
-static void lcd_draw_button(int index, char label, bool active)
-{
-    const int gap = 10;
-    const int top = 64;
-    const int button_h = 150;
-    const int button_w = (LCD_WIDTH - gap * 4) / 3;
-    const int x = gap + index * (button_w + gap);
-    const uint16_t bg = active ? rgb565(255, 255, 255) : rgb565(20, 22, 24);
-    const uint16_t border = rgb565(85, 90, 96);
-    const uint16_t fg = active ? rgb565(0, 0, 0) : rgb565(255, 255, 255);
-
-    lcd_fill_rect(x, top, button_w, button_h, bg);
-    lcd_fill_rect(x, top, button_w, 2, border);
-    lcd_fill_rect(x, top + button_h - 2, button_w, 2, border);
-    lcd_fill_rect(x, top, 2, button_h, border);
-    lcd_fill_rect(x + button_w - 2, top, 2, button_h, border);
-    lcd_draw_char_big(label, x + (button_w - 54) / 2, top + 38, fg);
-}
-
-static void lcd_draw_status_indicator(void)
-{
-    if (s_hid_connected) {
-        lcd_fill_rect(14, 10, 28, 24, rgb565(0, 235, 80));
-        lcd_fill_rect(20, 16, 16, 12, rgb565(210, 255, 220));
-        return;
-    }
-
-    const uint16_t red = rgb565(255, 40, 40);
-    lcd_fill_rect(14, 10, 28, 24, rgb565(45, 0, 0));
-    for (int i = 0; i < 24; i += 4) {
-        lcd_fill_rect(16 + i, 12 + i, 4, 4, red);
-        lcd_fill_rect(38 - i, 12 + i, 4, 4, red);
-    }
-}
-
-static void lcd_draw_ui(bool flash, char active_button)
-{
-    const uint16_t black = rgb565(0, 0, 0);
-    const uint16_t white = rgb565(255, 255, 255);
-
-    lcd_fill_rect(0, 0, LCD_WIDTH, LCD_HEIGHT, flash ? white : black);
-    lcd_fill_rect(0, 0, LCD_WIDTH, 44, rgb565(8, 10, 12));
-    lcd_draw_status_indicator();
-    lcd_fill_rect(56, 14, s_hid_connected ? 132 : 64, 16,
-                  s_hid_connected ? rgb565(0, 160, 70) : rgb565(170, 35, 35));
-    lcd_fill_rect(202, 14, 92, 16, rgb565(90, 100, 110));
-
-    lcd_draw_button(0, 'C', active_button == 'C');
-    lcd_draw_button(1, 'V', active_button == 'V');
-    lcd_draw_button(2, 'X', active_button == 'X');
 }
 
 static void lcd_init(void)
@@ -271,7 +172,7 @@ static void lcd_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_lcd_panel, true));
     gpio_set_level(LCD_BL_GPIO, 1);
 
-    lcd_draw_ui(false, 0);
+    lcd_draw_ui();
     ESP_LOGI(TAG, "lcd init ok");
 }
 
@@ -491,14 +392,14 @@ static void hidd_event_callback(void *handler_args, esp_event_base_t base, int32
     case ESP_HIDD_CONNECT_EVENT:
         s_hid_connected = true;
         ESP_LOGI(TAG, "BLE HID connected");
-        lcd_draw_ui(false, 0);
+        lcd_draw_ui();
         break;
     case ESP_HIDD_DISCONNECT_EVENT:
         s_hid_connected = false;
         ESP_LOGI(TAG, "BLE HID disconnected: %s",
                  esp_hid_disconnect_reason_str(esp_hidd_dev_transport_get(param->disconnect.dev),
                                                param->disconnect.reason));
-        lcd_draw_ui(false, 0);
+        lcd_draw_ui();
         esp_hid_ble_gap_adv_start();
         break;
     case ESP_HIDD_PROTOCOL_MODE_EVENT:
