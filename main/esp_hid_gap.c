@@ -662,10 +662,10 @@ esp_err_t esp_hid_ble_gap_adv_init(uint16_t appearance, const char *device_name)
 
     esp_ble_adv_data_t ble_adv_data = {
         .set_scan_rsp = false,
-        .include_name = true,
-        .include_txpower = true,
-        .min_interval = 0x0006, //slave connection min interval, Time = min_interval * 1.25 msec
-        .max_interval = 0x0010, //slave connection max interval, Time = max_interval * 1.25 msec
+        .include_name = false,
+        .include_txpower = false,
+        .min_interval = 0x0000,
+        .max_interval = 0x0000,
         .appearance = appearance,
         .manufacturer_len = 0,
         .p_manufacturer_data =  NULL,
@@ -675,12 +675,18 @@ esp_err_t esp_hid_ble_gap_adv_init(uint16_t appearance, const char *device_name)
         .p_service_uuid = (uint8_t *)hidd_service_uuid128,
         .flag = 0x6,
     };
+    esp_ble_adv_data_t ble_scan_rsp_data = {
+        .set_scan_rsp = true,
+        .include_name = true,
+        .include_txpower = true,
+        .appearance = appearance,
+    };
 
-    esp_ble_auth_req_t auth_req = ESP_LE_AUTH_REQ_SC_MITM_BOND;
+    esp_ble_auth_req_t auth_req = ESP_LE_AUTH_BOND;
     //esp_ble_io_cap_t iocap = ESP_IO_CAP_OUT;//you have to enter the key on the host
     //esp_ble_io_cap_t iocap = ESP_IO_CAP_IN;//you have to enter the key on the device
-    esp_ble_io_cap_t iocap = ESP_IO_CAP_IO;//you have to agree that key matches on both
-    //esp_ble_io_cap_t iocap = ESP_IO_CAP_NONE;//device is not capable of input or output, insecure
+    //esp_ble_io_cap_t iocap = ESP_IO_CAP_IO;//you have to agree that key matches on both
+    esp_ble_io_cap_t iocap = ESP_IO_CAP_NONE;//device is not capable of input or output
     uint8_t init_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
     uint8_t rsp_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
     uint8_t key_size = 16; //the key size should be 7~16 bytes
@@ -723,6 +729,10 @@ esp_err_t esp_hid_ble_gap_adv_init(uint16_t appearance, const char *device_name)
 
     if ((ret = esp_ble_gap_config_adv_data(&ble_adv_data)) != ESP_OK) {
         ESP_LOGE(TAG, "GAP config_adv_data failed: %d", ret);
+        return ret;
+    }
+    if ((ret = esp_ble_gap_config_adv_data(&ble_scan_rsp_data)) != ESP_OK) {
+        ESP_LOGE(TAG, "GAP config_scan_rsp_data failed: %d", ret);
         return ret;
     }
 

@@ -13,11 +13,15 @@
 #include "freertos/task.h"
 
 #include "driver/gpio.h"
+#include "driver/spi_master.h"
 #include "esp_chip_info.h"
 #include "esp_err.h"
 #include "esp_flash.h"
 #include "esp_hid_gap.h"
 #include "esp_hidd.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_vendor.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_system.h"
@@ -28,7 +32,7 @@
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
 
-#define DEVICE_NAME "CY01 Fast Keyboard"
+#define DEVICE_NAME "FastKeyboard"
 #define MANUFACTURER_NAME "Kenneth2Y"
 
 #define RTP_SCK_GPIO GPIO_NUM_25
@@ -39,6 +43,16 @@
 
 #define LCD_WIDTH 320
 #define LCD_HEIGHT 240
+#define LCD_HOST SPI2_HOST
+#define LCD_MISO_GPIO GPIO_NUM_12
+#define LCD_MOSI_GPIO GPIO_NUM_13
+#define LCD_SCLK_GPIO GPIO_NUM_14
+#define LCD_CS_GPIO GPIO_NUM_15
+#define LCD_DC_GPIO GPIO_NUM_2
+#define LCD_BL_GPIO GPIO_NUM_21
+#define LCD_PIXEL_CLOCK_HZ (40 * 1000 * 1000)
+#define LCD_CMD_BITS 8
+#define LCD_PARAM_BITS 8
 
 #define TOUCH_X_MIN 350
 #define TOUCH_X_MAX 3800
@@ -55,7 +69,10 @@
 static const char *TAG = "CY01";
 
 static esp_hidd_dev_t *s_hid_dev;
+static esp_lcd_panel_handle_t s_lcd_panel;
 static volatile bool s_hid_connected;
+
+static uint16_t s_lcd_line[LCD_WIDTH];
 
 static const uint8_t s_keyboard_report_map[] = {
     0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, HID_REPORT_ID_KEYBOARD,
@@ -91,6 +108,162 @@ typedef struct {
     uint16_t raw_x;
     uint16_t raw_y;
 } touch_point_t;
+
+static uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
+{
+    return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
+static void lcd_fill_rect(int x, int y, int w, int h, uint16_t color)
+{
+    if (!s_lcd_panel || w <= 0 || h <= 0) {
+        return;
+    }
+    if (x < 0) {
+        w += x;
+        x = 0;
+    }
+    if (y < 0) {
+        h += y;
+        y = 0;
+    }
+    if (x + w > LCD_WIDTH) {
+        w = LCD_WIDTH - x;
+    }
+    if (y + h > LCD_HEIGHT) {
+        h = LCD_HEIGHT - y;
+    }
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < w; i++) {
+        s_lcd_line[i] = color;
+    }
+    for (int row = 0; row < h; row++) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_draw_bitmap(s_lcd_panel, x, y + row, x + w, y + row + 1, s_lcd_line));
+    }
+}
+
+static void lcd_draw_char_big(char ch, int x, int y, uint16_t color)
+{
+    const int t = 10;
+    const int w = 54;
+    const int h = 72;
+
+    if (ch == 'C') {
+        lcd_fill_rect(x, y, w, t, color);
+        lcd_fill_rect(x, y + h - t, w, t, color);
+        lcd_fill_rect(x, y, t, h, color);
+    } else if (ch == 'V') {
+        lcd_fill_rect(x, y, t, h - 18, color);
+        lcd_fill_rect(x + w - t, y, t, h - 18, color);
+        lcd_fill_rect(x + 10, y + h - 18, w - 20, t, color);
+        lcd_fill_rect(x + 22, y + h - 8, w - 44, 8, color);
+    } else if (ch == 'X') {
+        for (int i = 0; i < h; i += 8) {
+            int px = (i * (w - t)) / h;
+            lcd_fill_rect(x + px, y + i, t, 8, color);
+            lcd_fill_rect(x + w - t - px, y + i, t, 8, color);
+        }
+    }
+}
+
+static void lcd_draw_button(int index, char label, bool active)
+{
+    const int gap = 10;
+    const int top = 64;
+    const int button_h = 150;
+    const int button_w = (LCD_WIDTH - gap * 4) / 3;
+    const int x = gap + index * (button_w + gap);
+    const uint16_t bg = active ? rgb565(255, 255, 255) : rgb565(20, 22, 24);
+    const uint16_t border = rgb565(85, 90, 96);
+    const uint16_t fg = active ? rgb565(0, 0, 0) : rgb565(255, 255, 255);
+
+    lcd_fill_rect(x, top, button_w, button_h, bg);
+    lcd_fill_rect(x, top, button_w, 2, border);
+    lcd_fill_rect(x, top + button_h - 2, button_w, 2, border);
+    lcd_fill_rect(x, top, 2, button_h, border);
+    lcd_fill_rect(x + button_w - 2, top, 2, button_h, border);
+    lcd_draw_char_big(label, x + (button_w - 54) / 2, top + 38, fg);
+}
+
+static void lcd_draw_ui(bool flash, char active_button)
+{
+    const uint16_t black = rgb565(0, 0, 0);
+    const uint16_t white = rgb565(255, 255, 255);
+    const uint16_t status = s_hid_connected ? rgb565(0, 100, 55) : rgb565(80, 55, 0);
+
+    lcd_fill_rect(0, 0, LCD_WIDTH, LCD_HEIGHT, flash ? white : black);
+    lcd_fill_rect(0, 0, LCD_WIDTH, 44, status);
+    lcd_fill_rect(14, 14, s_hid_connected ? 100 : 58, 16, white);
+    lcd_fill_rect(126, 14, 180, 16, rgb565(120, 130, 140));
+
+    lcd_draw_button(0, 'C', active_button == 'C');
+    lcd_draw_button(1, 'V', active_button == 'V');
+    lcd_draw_button(2, 'X', active_button == 'X');
+}
+
+static void lcd_flash_button(char button)
+{
+    if (!s_lcd_panel) {
+        return;
+    }
+    lcd_draw_ui(false, button);
+    vTaskDelay(pdMS_TO_TICKS(90));
+    lcd_draw_ui(false, 0);
+}
+
+static void lcd_init(void)
+{
+    ESP_LOGI(TAG, "lcd init: ST7789 MOSI=%d MISO=%d SCLK=%d CS=%d DC=%d BL=%d",
+             LCD_MOSI_GPIO, LCD_MISO_GPIO, LCD_SCLK_GPIO, LCD_CS_GPIO, LCD_DC_GPIO, LCD_BL_GPIO);
+
+    gpio_config_t bk_gpio_config = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = 1ULL << LCD_BL_GPIO,
+    };
+    ESP_ERROR_CHECK(gpio_config(&bk_gpio_config));
+    gpio_set_level(LCD_BL_GPIO, 0);
+
+    spi_bus_config_t buscfg = {
+        .sclk_io_num = LCD_SCLK_GPIO,
+        .mosi_io_num = LCD_MOSI_GPIO,
+        .miso_io_num = LCD_MISO_GPIO,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = LCD_WIDTH * 40 * sizeof(uint16_t),
+    };
+    ESP_ERROR_CHECK(spi_bus_initialize(LCD_HOST, &buscfg, SPI_DMA_CH_AUTO));
+
+    esp_lcd_panel_io_handle_t io_handle = NULL;
+    esp_lcd_panel_io_spi_config_t io_config = {
+        .dc_gpio_num = LCD_DC_GPIO,
+        .cs_gpio_num = LCD_CS_GPIO,
+        .pclk_hz = LCD_PIXEL_CLOCK_HZ,
+        .lcd_cmd_bits = LCD_CMD_BITS,
+        .lcd_param_bits = LCD_PARAM_BITS,
+        .spi_mode = 0,
+        .trans_queue_depth = 10,
+    };
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(LCD_HOST, &io_config, &io_handle));
+
+    esp_lcd_panel_dev_config_t panel_config = {
+        .reset_gpio_num = -1,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+        .bits_per_pixel = 16,
+    };
+    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &s_lcd_panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_reset(s_lcd_panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_init(s_lcd_panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(s_lcd_panel, true));
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(s_lcd_panel, true, true));
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_lcd_panel, true));
+    gpio_set_level(LCD_BL_GPIO, 1);
+
+    lcd_draw_ui(false, 0);
+    ESP_LOGI(TAG, "lcd init ok");
+}
 
 static uint8_t spi_transfer_byte(uint8_t out)
 {
@@ -219,6 +392,7 @@ static void touch_task(void *arg)
         char button = button_for_touch(&point);
         ESP_LOGI(TAG, "touch raw=(%" PRIu16 ",%" PRIu16 ") mapped=(%d,%d) button=%c",
                  point.raw_x, point.raw_y, point.x, point.y, button);
+        lcd_flash_button(button);
         send_mac_shortcut(button);
 
         while (gpio_get_level(RTP_IRQ_GPIO) == 0) {
@@ -286,12 +460,14 @@ static void hidd_event_callback(void *handler_args, esp_event_base_t base, int32
     case ESP_HIDD_CONNECT_EVENT:
         s_hid_connected = true;
         ESP_LOGI(TAG, "BLE HID connected");
+        lcd_draw_ui(false, 0);
         break;
     case ESP_HIDD_DISCONNECT_EVENT:
         s_hid_connected = false;
         ESP_LOGI(TAG, "BLE HID disconnected: %s",
                  esp_hid_disconnect_reason_str(esp_hidd_dev_transport_get(param->disconnect.dev),
                                                param->disconnect.reason));
+        lcd_draw_ui(false, 0);
         esp_hid_ble_gap_adv_start();
         break;
     case ESP_HIDD_PROTOCOL_MODE_EVENT:
@@ -327,6 +503,7 @@ void app_main(void)
     }
 
     log_device_info();
+    lcd_init();
     touch_init();
 
     ESP_ERROR_CHECK(esp_hid_gap_init(HIDD_BLE_MODE));
