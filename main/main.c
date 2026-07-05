@@ -25,7 +25,6 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_system.h"
-#include "esp_timer.h"
 #include "nvs_flash.h"
 
 #include "esp_bt.h"
@@ -33,7 +32,7 @@
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
 
-#include "lvgl.h"
+#include "ui_assets.h"
 
 #define DEVICE_NAME "FastKeyboard"
 #define MANUFACTURER_NAME "Kenneth2Y"
@@ -53,12 +52,10 @@
 #define LCD_CS_GPIO GPIO_NUM_15
 #define LCD_DC_GPIO GPIO_NUM_2
 #define LCD_BL_GPIO GPIO_NUM_21
-#define LCD_PIXEL_CLOCK_HZ (40 * 1000 * 1000)
+#define LCD_PIXEL_CLOCK_HZ (10 * 1000 * 1000)
 #define LCD_CMD_BITS 8
 #define LCD_PARAM_BITS 8
-#define LVGL_TICK_MS 2
-#define LVGL_TASK_DELAY_MS 10
-#define LVGL_DRAW_BUF_LINES 12
+#define LCD_DRAW_CHUNK_LINES 16
 
 #define BEEPER_GPIO GPIO_NUM_23
 #define BEEPER_PULSE_MS 80
@@ -79,13 +76,7 @@ static const char *TAG = "CY01";
 
 static esp_hidd_dev_t *s_hid_dev;
 static esp_lcd_panel_handle_t s_lcd_panel;
-static lv_display_t *s_lvgl_display;
-static lv_obj_t *s_status_label;
-static lv_obj_t *s_status_mark;
-static lv_obj_t *s_bt_mark;
 static volatile bool s_hid_connected;
-static volatile bool s_ui_dirty;
-static bool s_ui_rendered_connected;
 
 static const uint8_t s_keyboard_report_map[] = {
     0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, HID_REPORT_ID_KEYBOARD,
@@ -122,146 +113,20 @@ typedef struct {
     uint16_t raw_y;
 } touch_point_t;
 
-static void lvgl_flush(lv_display_t *display, const lv_area_t *area, uint8_t *px_map)
+static void lcd_draw_ui(void)
 {
     if (!s_lcd_panel) {
-        lv_display_flush_ready(display);
         return;
     }
 
-    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_draw_bitmap(
-        s_lcd_panel,
-        area->x1,
-        area->y1,
-        area->x2 + 1,
-        area->y2 + 1,
-        px_map));
-    lv_display_flush_ready(display);
-}
-
-static void lvgl_tick_cb(void *arg)
-{
-    (void)arg;
-    lv_tick_inc(LVGL_TICK_MS);
-}
-
-static void ui_set_connected(bool connected)
-{
-    if (!s_status_mark || !s_status_label || !s_bt_mark) {
-        return;
-    }
-
-    if (connected) {
-        lv_label_set_text(s_status_mark, LV_SYMBOL_OK);
-        lv_obj_set_style_text_color(s_status_mark, lv_color_hex(0x32D66B), 0);
-        lv_label_set_text(s_status_label, "Connected");
-        lv_obj_set_style_text_color(s_status_label, lv_color_hex(0x32D66B), 0);
-        lv_label_set_text(s_bt_mark, LV_SYMBOL_BLUETOOTH);
-        lv_obj_set_style_text_color(s_bt_mark, lv_color_hex(0x4A9CFF), 0);
-    } else {
-        lv_label_set_text(s_status_mark, LV_SYMBOL_CLOSE);
-        lv_obj_set_style_text_color(s_status_mark, lv_color_hex(0xFF5148), 0);
-        lv_label_set_text(s_status_label, "Disconnected");
-        lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xFF5148), 0);
-        lv_label_set_text(s_bt_mark, LV_SYMBOL_CLOSE);
-        lv_obj_set_style_text_color(s_bt_mark, lv_color_hex(0xFF5148), 0);
-    }
-    s_ui_rendered_connected = connected;
-}
-
-static void ui_create_button(lv_obj_t *parent, int x, const char *label)
-{
-    lv_obj_t *button = lv_obj_create(parent);
-    lv_obj_set_size(button, 94, 144);
-    lv_obj_set_pos(button, x, 74);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x100D08), 0);
-    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(button, lv_color_hex(0x6E470D), 0);
-    lv_obj_set_style_border_width(button, 2, 0);
-    lv_obj_set_style_radius(button, 5, 0);
-    lv_obj_set_style_pad_all(button, 0, 0);
-
-    lv_obj_t *inner = lv_obj_create(button);
-    lv_obj_set_size(inner, 86, 72);
-    lv_obj_align(inner, LV_ALIGN_CENTER, 0, -5);
-    lv_obj_set_style_bg_color(inner, lv_color_hex(0x181209), 0);
-    lv_obj_set_style_bg_opa(inner, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(inner, lv_color_hex(0x80500D), 0);
-    lv_obj_set_style_border_width(inner, 2, 0);
-    lv_obj_set_style_radius(inner, 6, 0);
-    lv_obj_set_style_pad_all(inner, 0, 0);
-
-    lv_obj_t *text = lv_label_create(inner);
-    lv_label_set_text(text, label);
-    lv_obj_set_style_text_font(text, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_text_color(text, lv_color_hex(0xF5F1E7), 0);
-    lv_obj_center(text);
-
-    lv_obj_t *line = lv_obj_create(button);
-    lv_obj_set_size(line, 88, 4);
-    lv_obj_align(line, LV_ALIGN_BOTTOM_MID, 0, -30);
-    lv_obj_set_style_bg_color(line, lv_color_hex(0xD88900), 0);
-    lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(line, 0, 0);
-    lv_obj_set_style_radius(line, 2, 0);
-}
-
-static void ui_create(void)
-{
-    lv_obj_t *screen = lv_screen_active();
-    lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_all(screen, 0, 0);
-    lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
-
-    s_status_mark = lv_label_create(screen);
-    lv_obj_set_style_text_font(s_status_mark, &lv_font_montserrat_48, 0);
-    lv_obj_set_pos(s_status_mark, 16, 7);
-
-    lv_obj_t *title = lv_label_create(screen);
-    lv_label_set_text(title, DEVICE_NAME);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xF7F3EA), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 13);
-
-    s_status_label = lv_label_create(screen);
-    lv_obj_set_style_text_font(s_status_label, &lv_font_montserrat_14, 0);
-    lv_obj_align(s_status_label, LV_ALIGN_TOP_MID, 0, 43);
-
-    s_bt_mark = lv_label_create(screen);
-    lv_obj_set_style_text_font(s_bt_mark, &lv_font_montserrat_24, 0);
-    lv_obj_align(s_bt_mark, LV_ALIGN_TOP_RIGHT, -16, 16);
-
-    lv_obj_t *divider = lv_obj_create(screen);
-    lv_obj_set_size(divider, LCD_WIDTH, 1);
-    lv_obj_set_pos(divider, 0, 58);
-    lv_obj_set_style_bg_color(divider, lv_color_hex(0x2E210C), 0);
-    lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(divider, 0, 0);
-
-    ui_create_button(screen, 5, "C");
-    ui_create_button(screen, 113, "V");
-    ui_create_button(screen, 221, "X");
-
-    ui_set_connected(s_hid_connected);
-}
-
-static void ui_request_refresh(void)
-{
-    s_ui_dirty = true;
-}
-
-static void lvgl_task(void *arg)
-{
-    (void)arg;
-    while (true) {
-        if (s_ui_dirty || s_ui_rendered_connected != s_hid_connected) {
-            s_ui_dirty = false;
-            ui_set_connected(s_hid_connected);
-            lv_obj_invalidate(lv_screen_active());
+    const uint16_t *image = s_hid_connected ? s_ui_bt_on : s_ui_bt_off;
+    for (int y = 0; y < LCD_HEIGHT; y += LCD_DRAW_CHUNK_LINES) {
+        int y_end = y + LCD_DRAW_CHUNK_LINES;
+        if (y_end > LCD_HEIGHT) {
+            y_end = LCD_HEIGHT;
         }
-        lv_timer_handler();
-        vTaskDelay(pdMS_TO_TICKS(LVGL_TASK_DELAY_MS));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_draw_bitmap(
+            s_lcd_panel, 0, y, LCD_WIDTH, y_end, image + y * LCD_WIDTH));
     }
 }
 
@@ -308,28 +173,11 @@ static void lcd_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_reset(s_lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(s_lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(s_lcd_panel, true));
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(s_lcd_panel, true, false));
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(s_lcd_panel, false, true));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_lcd_panel, true));
     gpio_set_level(LCD_BL_GPIO, 1);
 
-    lv_init();
-    s_lvgl_display = lv_display_create(LCD_WIDTH, LCD_HEIGHT);
-    lv_display_set_color_format(s_lvgl_display, LV_COLOR_FORMAT_RGB565);
-    lv_display_set_flush_cb(s_lvgl_display, lvgl_flush);
-
-    static uint8_t lvgl_buf_1[LCD_WIDTH * LVGL_DRAW_BUF_LINES * 2];
-    lv_display_set_buffers(s_lvgl_display, lvgl_buf_1, NULL, sizeof(lvgl_buf_1), LV_DISPLAY_RENDER_MODE_PARTIAL);
-
-    const esp_timer_create_args_t tick_timer_args = {
-        .callback = lvgl_tick_cb,
-        .name = "lvgl_tick",
-    };
-    esp_timer_handle_t tick_timer = NULL;
-    ESP_ERROR_CHECK(esp_timer_create(&tick_timer_args, &tick_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, LVGL_TICK_MS * 1000));
-
-    ui_create();
-    xTaskCreate(lvgl_task, "lvgl_task", 8192, NULL, 4, NULL);
+    lcd_draw_ui();
     ESP_LOGI(TAG, "lcd init ok");
 }
 
@@ -549,14 +397,14 @@ static void hidd_event_callback(void *handler_args, esp_event_base_t base, int32
     case ESP_HIDD_CONNECT_EVENT:
         s_hid_connected = true;
         ESP_LOGI(TAG, "BLE HID connected");
-        ui_request_refresh();
+        lcd_draw_ui();
         break;
     case ESP_HIDD_DISCONNECT_EVENT:
         s_hid_connected = false;
         ESP_LOGI(TAG, "BLE HID disconnected: %s",
                  esp_hid_disconnect_reason_str(esp_hidd_dev_transport_get(param->disconnect.dev),
                                                param->disconnect.reason));
-        ui_request_refresh();
+        lcd_draw_ui();
         esp_hid_ble_gap_adv_start();
         break;
     case ESP_HIDD_PROTOCOL_MODE_EVENT:
